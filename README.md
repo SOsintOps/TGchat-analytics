@@ -8,10 +8,8 @@
 
 [Open App](https://chatanalytics.app) • [View Demo](https://chatanalytics.app/demo) • [Use CLI](#cli)
 
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/mlomb/chat-analytics/cicd.yml)](https://github.com/mlomb/chat-analytics/actions)
-[![codecov](https://codecov.io/gh/mlomb/chat-analytics/branch/main/graph/badge.svg)](https://codecov.io/gh/mlomb/chat-analytics)
-[![npm](https://img.shields.io/npm/v/chat-analytics)](https://www.npmjs.com/package/chat-analytics)
-[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?logo=docker&logoColor=white)](https://hub.docker.com/r/mlomb/chat-analytics)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/mlshdev/chat-analytics/docker.yml)](https://github.com/mlshdev/chat-analytics/actions)
+[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?logo=docker&logoColor=white)](https://github.com/mlshdev/chat-analytics/pkgs/container/chat-analytics)
 
 [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate/?hosted_button_id=NKHZJPKFJ34WJ)
 
@@ -76,20 +74,74 @@ npx chat-analytics -p discord -i "exported/*.json" -o report.html
 
 ## Docker Compose
 
-You can self-host the app using the official docker image provided at https://hub.docker.com/r/mlomb/chat-analytics. Check out the [Dockerfile](/Dockerfile).
+You can self-host the app using the official docker image provided at `ghcr.io/mlshdev/chat-analytics`. Check out the [Dockerfile](/Dockerfile).
+
+### Basic Usage (Web Interface Only)
 
 Example `docker-compose.yaml`:
 
 ```yaml
 services:
   chat-analytics:
-    image: mlomb/chat-analytics:latest
+    image: ghcr.io/mlshdev/chat-analytics:latest
     ports:
       - 1234:80
     restart: unless-stopped
 ```
 
 You can map the web interface port as required by changing the port mapping, internal port must be kept to 80.
+
+### Auto-Generate Report from Mounted Export Files
+
+You can automatically generate and serve a report by mounting your export files and setting the `PLATFORM` environment variable:
+
+```yaml
+services:
+  chat-analytics:
+    image: ghcr.io/mlshdev/chat-analytics:latest
+    ports:
+      - 1234:80
+    volumes:
+      - /path/to/your/exports:/exportdata
+    environment:
+      - PLATFORM=discord  # Options: discord, messenger, telegram, whatsapp
+    restart: unless-stopped
+```
+
+Or using docker run:
+
+```bash
+docker run -d -p 1234:80 \
+  -v /path/to/your/exports:/exportdata \
+  -e PLATFORM=discord \
+  ghcr.io/mlshdev/chat-analytics:latest
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PLATFORM` | The platform to generate a report for. If set, auto-generates a report from files in `EXPORT_DIR`. Options: `discord`, `messenger`, `telegram`, `whatsapp` | (not set) |
+| `EXPORT_DIR` | Directory containing export files to process | `/exportdata` |
+| `DEMO` | Mark the generated report as a demo (`true` or `1`) | `false` |
+
+### Custom Export Directory
+
+You can customize the export directory path:
+
+```yaml
+services:
+  chat-analytics:
+    image: ghcr.io/mlshdev/chat-analytics:latest
+    ports:
+      - 1234:80
+    volumes:
+      - /mnt/export:/custom/path
+    environment:
+      - PLATFORM=whatsapp
+      - EXPORT_DIR=/custom/path
+    restart: unless-stopped
+```
 
 ## Docs & Development
 
