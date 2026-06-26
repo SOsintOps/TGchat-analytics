@@ -71,13 +71,18 @@ export class TelegramParser extends Parser {
             ? message.reply_to_message_id + ""
             : undefined;
 
-        // read from unix timestamp or full datetime
-        const timestamp = message.date_unixtime ? parseInt(message.date_unixtime) * 1000 : Date.parse(message.date!);
-        const timestampEdit = message.edited_unixtime
+        // read from unix timestamp (UTC, newer exports) or full local datetime (older exports)
+        let timestamp = message.date_unixtime ? parseInt(message.date_unixtime) * 1000 : Date.parse(message.date ?? "");
+        if (Number.isNaN(timestamp)) {
+            // unparseable/missing date — fall back to the last known timestamp to preserve ordering
+            timestamp = this.lastEmittedMessageTimestamp ?? this.lastMessageTimestampInFile ?? 0;
+        }
+        let timestampEdit = message.edited_unixtime
             ? parseInt(message.edited_unixtime) * 1000
             : message.edited
             ? Date.parse(message.edited)
             : undefined;
+        if (timestampEdit !== undefined && Number.isNaN(timestampEdit)) timestampEdit = undefined;
 
         if (message.type === "message") {
             const pauthor: PAuthor = {
@@ -89,7 +94,9 @@ export class TelegramParser extends Parser {
             };
             this.emit("author", pauthor, this.lastMessageTimestampInFile);
 
-            let textContent = this.parseTextArray(message.text);
+            // Prefer the newer `text_entities` (objects-only) when present; fall back to legacy `text`
+            // (which may be a plain string or a mixed (string | entity)[] array). Both carry equivalent content.
+            let textContent = this.parseTextArray(message.text_entities ?? message.text);
             let attachment: AttachmentType | undefined;
 
             // determinate attachment type
@@ -142,9 +149,10 @@ export class TelegramParser extends Parser {
         }
     }
 
-    private parseTextArray(input: string | TextArray | TextArray[]): string {
+    private parseTextArray(input: string | TextArray | (string | TextArray)[] | undefined | null): string {
+        if (input === undefined || input === null) return "";
         if (typeof input === "string") return input;
-        if (Array.isArray(input)) return input.map(this.parseTextArray.bind(this)).join("");
+        if (Array.isArray(input)) return input.map((i) => this.parseTextArray(i)).join("");
         switch (input.type) {
             // remove slash and split potential @
             // examples:

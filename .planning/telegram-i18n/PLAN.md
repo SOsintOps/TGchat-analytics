@@ -163,11 +163,11 @@ storage, bloats file, breaks privacy). Verify Claude model IDs/pricing via the `
 - [ ] A2. Add a synthetic **Chinese (T+S)** message fixture for CJK tokenizer tests.
 - [ ] A3. Establish cross-validation harness: parse `sample` JSON vs HTML for the same chat → assert matching message/author counts & date range.
 
-### Phase B — JSON hardening (old/new)
-- [ ] B1. Extend `Telegram.d.ts` types: `text_entities?`, `from_id: string|number`, open `action`, media placeholders, `forwarded_from`, `reply_to_peer_id`.
-- [ ] B2. Prefer `text_entities` when present (else legacy `text`); add default entity branch; bare-URL `link`, `text_link` href, `custom_emoji`.
-- [ ] B3. Tolerate media placeholder strings; guard `Date.parse` NaN; per-file try/catch for invalid-JSON exports.
-- [ ] B4. Unit tests: old-format fixture (no `_unixtime`, integer `from_id`) + new-format fixture (prefixed ids, `text_entities`, custom_emoji).
+### Phase B — JSON hardening (old/new) ✅ DONE (commit)
+- [x] B1. Extended `Telegram.d.ts`: `text_entities?`, open `action`/`type`, `from_id: string|number` (+prefixed-id note), media placeholders (`photo`/`file`), `forwarded_from(_id)`, `reply_to_peer_id`, `saved_from`, richer `TextArray` (plain/custom_emoji/spoiler/href/document_id…). `text` made optional.
+- [x] B2. `TelegramParser` prefers `text_entities ?? text`; `parseTextArray` widened to `string | (string|TextArray)[]` + undefined guard; unknown entity types fall through to `.text` (custom_emoji etc.).
+- [x] B3. `Date.parse` NaN guard (falls back to last-known ts to preserve ordering); `edited` NaN→undefined. (Per-file invalid-JSON try/catch deferred — handled at the generate-orchestration layer; noted.)
+- [x] B4. `tests/parse/TelegramParser.test.ts`: OLD fixture (no `_unixtime`, integer `from_id`, legacy array), NEW fixture (prefixed id, `text_entities`, custom_emoji, **Cyrillic name**), malformed-date resilience. **21/21 pass** (incl. existing sample test).
 
 ### Phase C — HTML directory parser (net-new)
 - [ ] C1. Directory-aware input: collect+sort `messages*.html`; expose to parser (browser `webkitdirectory` + Node test path).
