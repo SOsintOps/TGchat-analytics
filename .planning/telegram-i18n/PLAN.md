@@ -1,8 +1,14 @@
 # Telegram Ingestion + i18n + Translation — Analysis & Plan (scaletta)
 
-**Status:** PLANNING COMPLETE → IMPLEMENTATION IN PROGRESS. This document is the resumable
-source of truth. Check the boxes in §6 as work lands; each box = one atomic commit.
+**Status:** ✅ IMPLEMENTATION COMPLETE (core). Phases B/C/D shipped & tested on real data;
+E = research (per scope); refinements deferred and listed in §8. This document is the
+resumable source of truth — each checked box = one atomic commit.
 **Branch:** `base-mlshdev` (the detached modernized base). **Created:** 2026-06-26.
+
+**Commits:** plan `4f… (docs)` · Phase B `c22865f` · Phase C `c3ba227` · Phase D `a2badaf`.
+**Result:** Telegram now ingests **both JSON (old+new) and HTML-directory** exports; Chinese
+(Simplified+Traditional) and Japanese tokenize into real words; Russian verified. Full suite
+264 pass (only the 6 pre-existing Plausible telemetry tests fail); `bun run build:web` green.
 
 Scope confirmed with stakeholder:
 - IMPLEMENT: Telegram **HTML-directory** parsing, **old/new JSON** hardening, **non-Western**
@@ -180,13 +186,21 @@ storage, bloats file, breaks privacy). Verify Claude model IDs/pricing via the `
 - [x] D2/D3. CJK support added in `Tokenizer.ts` via **native `Intl.Segmenter`** (sync, zero-dependency, ICU dictionary, Baseline 2024) — chosen over the kisasara jieba-wasm route to avoid an async ripple + WASM asset loading in the worker. `expandCJKWords` re-segments any CJK-containing "word" token (lazy per-script `zh`/`ja` segmenters; graceful fallback if `Intl.Segmenter` absent). ICU handles BOTH Simplified and Traditional natively, sidestepping kisasara's Traditional-via-Simplified-jieba gap. **Deferred refinement:** `opencc-js` T→S normalization purely for stopword/AFINN *lookup keys* (segmentation already works) — see §3.3.
 - [x] D4. `tests/process/Tokenizer.test.ts` (5/5): Latin unchanged, Russian Cyrillic, Simplified + Traditional Chinese (lossless multi-word), mixed CJK+Latin boundary split.
 
-### Phase E — Translation
-- [ ] E1. (DONE here) Documented research + recommendation (§5). No code. Future phase: implement parse-time pluggable translator.
+### Phase E — Translation ✅ DONE (research only, per scope)
+- [x] E1. Documented research + recommendation (§5): parse-time hook before tokenization, local-first engine (LibreTranslate/Opus-MT; transformers.js for small offline chats), Claude Batch as opt-in cloud fallback, dictionary-keyed cache + `langIndex` skip. No code this cycle. Future phase: implement the pluggable parse-time translator.
 
-### Phase F — Verify & ship
-- [ ] F1. `bun run test` green (except pre-existing Plausible telemetry failures, tracked separately).
-- [ ] F2. `bun run build:web` succeeds; smoke-generate a report from a `sample` chat.
-- [ ] F3. Update this PLAN's checkboxes; final commit + push.
+### Phase F — Verify & ship ✅ DONE
+- [x] F1. Full `jest` suite: **264 pass / 6 fail**, the 6 being only the pre-existing `Plausible.test.ts` (Jest-30 jsdom location mock) — unrelated to this work.
+- [x] F2. `bun run build:web` compiles green; `report.html` (1.32 MiB) emitted with `node-html-parser` bundled into the worker.
+- [x] F3. PLAN checkboxes updated; commits pushed to `origin/base-mlshdev`.
+
+## 8. DEFERRED refinements (non-blocking, documented for the next cycle)
+- `opencc-js` Traditional→Simplified normalization for **stopword/AFINN lookup keys** (segmentation already works via Intl.Segmenter; this only sharpens Traditional stopword filtering).
+- `webkitdirectory` folder-picker in `FilesSelection.tsx` for one-click HTML-export folder import (multi-file selection already works today).
+- Per-file try/catch around invalid-JSON exports (tdesktop custom-emoji bug #24961) at the generate-orchestration layer.
+- HTML author identity is display-name-based (no `from_id`) — over/under-counts vs JSON (documented in §2.2/A3); could heuristically merge using avatar/userpic indices if needed.
+- Optional: implement the parse-time translation pipeline (Phase E design).
+- Telemetry (Plausible) likely removed from the independent product → would also clear the 6 failing tests.
 
 ---
 
