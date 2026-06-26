@@ -175,11 +175,10 @@ storage, bloats file, breaks privacy). Verify Claude model IDs/pricing via the `
 - [x] C3. Format auto-detection inside `parse()` (HTML vs JSON vs skip). No `createParser` change needed — `createParser("telegram")` handles both formats transparently. Added `transformIgnorePatterns` so jest transforms node-html-parser's ESM `entities` dep.
 - [x] C4. `tests/parse/TelegramHtmlParser.test.ts` (2/2 pass) + real-sample cross-validation (A3).
 
-### Phase D — Non-Western tokenization
-- [ ] D1. Verify Russian: tokenization + `ru` stopwords on the `OSINT форум расследований` sample; add a Russian assertion test.
-- [ ] D2. CJK support: add `cjk-chunk` Unicode-range matcher; async `tokenize()`; segmenter abstraction.
-- [ ] D3. Segmenter: `Intl.Segmenter('zh')` baseline; **opencc-js** Traditional→Simplified normalization for lookup key (fix kisasara's gap); optional lazy `jieba-wasm`. Chinese stopwords/AFINN (Simplified).
-- [ ] D4. Tests: Simplified + Traditional fixture → correct multi-word segmentation + stopword filtering; ensure Latin/Cyrillic path unchanged.
+### Phase D — Non-Western tokenization ✅ DONE (commit) — CJK seg + Russian verified
+- [x] D1. Russian verified: `\p{L}` already covers Cyrillic; test asserts "Привет мир как дела" → 4 separate words. (Full `ru`-stopword check happens downstream via the existing stopwords-iso `ru` list — unchanged.)
+- [x] D2/D3. CJK support added in `Tokenizer.ts` via **native `Intl.Segmenter`** (sync, zero-dependency, ICU dictionary, Baseline 2024) — chosen over the kisasara jieba-wasm route to avoid an async ripple + WASM asset loading in the worker. `expandCJKWords` re-segments any CJK-containing "word" token (lazy per-script `zh`/`ja` segmenters; graceful fallback if `Intl.Segmenter` absent). ICU handles BOTH Simplified and Traditional natively, sidestepping kisasara's Traditional-via-Simplified-jieba gap. **Deferred refinement:** `opencc-js` T→S normalization purely for stopword/AFINN *lookup keys* (segmentation already works) — see §3.3.
+- [x] D4. `tests/process/Tokenizer.test.ts` (5/5): Latin unchanged, Russian Cyrillic, Simplified + Traditional Chinese (lossless multi-word), mixed CJK+Latin boundary split.
 
 ### Phase E — Translation
 - [ ] E1. (DONE here) Documented research + recommendation (§5). No code. Future phase: implement parse-time pluggable translator.

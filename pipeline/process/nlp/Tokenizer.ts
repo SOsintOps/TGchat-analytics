@@ -151,5 +151,48 @@ export const tokenizeStep = (input: string, matcherIndex: number): Token[] => {
     return result;
 };
 
+// ───────────────── CJK (no inter-word spaces) word segmentation ─────────────────
+// The regex word matcher captures an entire run of Han/Kana as ONE token, which makes
+// per-word stats meaningless for Chinese/Japanese. We fix that by re-segmenting any
+// CJK-containing word token with the native, synchronous, zero-dependency `Intl.Segmenter`
+// (ICU dictionary-based; Baseline 2024; handles BOTH Simplified and Traditional Chinese).
+// Russian/Cyrillic is space-delimited and already tokenizes correctly via \p{L} — untouched.
+// See .planning/telegram-i18n/PLAN.md §2.3 / §D.
+
+// CJK Unified Ideographs (+Ext A & compat) and Japanese Hiragana/Katakana
+const CJK_RE = /[㐀-䶿一-鿿豈-﫿぀-ヿ]/;
+const KANA_RE = /[぀-ヿ]/;
+
+type SegData = { segment: string; isWordLike?: boolean };
+type Segmenter = { segment(input: string): Iterable<SegData> };
+const IntlSegmenter: (new (locale?: string, opts?: { granularity: "word" }) => Segmenter) | undefined =
+    typeof Intl !== "undefined" ? (Intl as any).Segmenter : undefined;
+
+let zhSeg: Segmenter | undefined;
+let jaSeg: Segmenter | undefined;
+const getSegmenter = (text: string): Segmenter | undefined => {
+    if (!IntlSegmenter) return undefined;
+    if (KANA_RE.test(text)) return (jaSeg ??= new IntlSegmenter("ja", { granularity: "word" }));
+    return (zhSeg ??= new IntlSegmenter("zh", { granularity: "word" }));
+};
+
+/** Expands any "word" token containing CJK into individually segmented word tokens. */
+const expandCJKWords = (tokens: Token[]): Token[] => {
+    const out: Token[] = [];
+    for (const t of tokens) {
+        if (t.tag === "word" && CJK_RE.test(t.text)) {
+            const seg = getSegmenter(t.text);
+            if (seg) {
+                for (const { segment, isWordLike } of seg.segment(t.text)) {
+                    if (isWordLike && segment.length > 0) out.push({ text: segment, tag: "word" });
+                }
+                continue;
+            }
+        }
+        out.push(t);
+    }
+    return out;
+};
+
 /** Tokenizes a string into a list of tokens */
-export const tokenize = (input: string): Token[] => tokenizeStep(input, 0);
+export const tokenize = (input: string): Token[] => expandCJKWords(tokenizeStep(input, 0));
