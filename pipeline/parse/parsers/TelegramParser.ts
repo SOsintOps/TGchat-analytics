@@ -1,4 +1,6 @@
-import { AttachmentType, getAttachmentTypeFromMimeType } from "@pipeline/Attachments";
+import { HTMLElement, parse as parseHtml } from "node-html-parser";
+
+import { AttachmentType, getAttachmentTypeFromFileName, getAttachmentTypeFromMimeType } from "@pipeline/Attachments";
 import { Progress } from "@pipeline/Progress";
 import { Timestamp } from "@pipeline/Types";
 import { FileInput, streamJSONFromFile, tryToFindTimestampAtEnd } from "@pipeline/parse/File";
@@ -21,6 +23,31 @@ export class TelegramParser extends Parser {
     static readonly TS_MSG_REGEX = /"date(?:_unixtime)?": ?"(.+?)"/gi;
 
     async *parse(file: FileInput, progress?: Progress) {
+        // Telegram Desktop can export as JSON (result.json) or as an HTML directory
+        // (messages.html, messages2.html, ... + css/js/media). The UI hands us every selected
+        // file, so we detect the format from the head and silently skip non-message files
+        // (css/js/photos/...). See .planning/telegram-i18n/PLAN.md §2.2/§C.
+        const head = new TextDecoder("utf-8").decode(await file.slice(0, Math.min(file.size, 4096))).trimStart();
+        const isHtml =
+            /\.html?$/i.test(file.name) ||
+            head.startsWith("<!DOCTYPE") ||
+            head.startsWith("<html") ||
+            head.includes('class="message');
+        const isJson = head.startsWith("{") || head.startsWith("[");
+
+        if (isHtml) {
+            yield* this.parseHtmlFile(file, progress);
+        } else if (isJson) {
+            yield* this.parseJsonFile(file, progress);
+        }
+        // else: not a Telegram message file (css/js/media/etc.) — skip
+
+        this.lastChannelName = undefined;
+        this.lastChannelID = undefined;
+        this.lastEmittedMessageTimestamp = undefined;
+    }
+
+    private async *parseJsonFile(file: FileInput, progress?: Progress) {
         this.lastMessageTimestampInFile = await tryToFindTimestampAtEnd(TelegramParser.TS_MSG_REGEX, file);
 
         const stream = new JSONStream()
@@ -30,10 +57,6 @@ export class TelegramParser extends Parser {
             .onArrayItem<TelegramMessage>("messages", this.parseMessage.bind(this));
 
         yield* streamJSONFromFile(stream, file, progress);
-
-        this.lastChannelName = undefined;
-        this.lastChannelID = undefined;
-        this.lastEmittedMessageTimestamp = undefined;
     }
 
     private onChannelName(channelName: string) {
@@ -179,5 +202,114 @@ export class TelegramParser extends Parser {
             default:
                 return input.text;
         }
+    }
+
+    // ───────────────────────── HTML export (directory) support ─────────────────────────
+    // The pipeline runs in a Web Worker where DOMParser is unavailable, so we use the
+    // worker-safe `node-html-parser`. HTML exports lack from_id / numeric chat id / chat type /
+    // reactions / edit-times, so we key authors & channel off display names. See PLAN §2.2/§C.
+
+    private async *parseHtmlFile(file: FileInput, progress?: Progress) {
+        const html = new TextDecoder("utf-8").decode(await file.slice(0, file.size));
+        const root = parseHtml(html);
+
+        const name = root.querySelector(".page_header .text.bold")?.text.trim() || this.lastChannelName || "Telegram chat";
+        this.lastChannelName = name;
+        // HTML has no numeric id or chat type → key the channel off its name, default type "group"
+        const channelId: RawID = "tg-html:" + name;
+
+        this.emit("guild", { id: 0, name: "Telegram Chats" });
+        this.emit("channel", { id: channelId, guildId: 0, name, type: "group" });
+
+        let lastAuthorName: string | undefined;
+        const messages = root.querySelectorAll(".message");
+
+        let processed = 0;
+        for (const el of messages) {
+            // Service messages (date dividers, joins, pins, "channel created", calls) carry no
+            // machine-readable author/action → skip and reset the joined-author run.
+            if (el.classList.contains("service")) {
+                lastAuthorName = undefined;
+                continue;
+            }
+
+            // "joined" messages omit the userpic + from_name: reuse the last author of the run.
+            const fromName = el.querySelector(".from_name")?.text.trim();
+            if (fromName) lastAuthorName = fromName;
+            const authorName = lastAuthorName || "Unknown";
+            const authorId: RawID = "tg-html:" + authorName; // HTML has no from_id → identity is the display name
+
+            const rawId: RawID = (el.getAttribute("id") || "").replace("message", "") || processed + "";
+
+            // Full datetime is in the `title` attr (LOCAL time + explicit UTC offset), not the visible text.
+            const title = el.querySelector(".pull_right.date.details")?.getAttribute("title");
+            const timestamp = this.parseHtmlDate(title);
+
+            const textContent = el.querySelector(".text")?.text.trim() ?? "";
+
+            const replyHref = el.querySelector(".reply_to a")?.getAttribute("href");
+            const replyTo = replyHref?.match(/#go_to_message(\d+)/)?.[1];
+
+            const attachment = this.detectHtmlAttachment(el);
+
+            this.emit("author", { id: authorId, name: authorName, bot: false });
+
+            if (this.lastEmittedMessageTimestamp !== undefined && timestamp < this.lastEmittedMessageTimestamp) {
+                this.emit("out-of-order");
+            }
+
+            this.emit("message", {
+                id: rawId,
+                replyTo,
+                authorId,
+                channelId,
+                timestamp,
+                textContent,
+                attachments: attachment === undefined ? [] : [attachment],
+            });
+            this.lastEmittedMessageTimestamp = timestamp;
+
+            if (++processed % 500 === 0) {
+                progress?.progress("number", processed, messages.length);
+                yield;
+            }
+        }
+        yield;
+    }
+
+    /** Parses a Telegram HTML date title "dd.mm.yyyy HH:MM:SS UTC±HH:MM" into a UTC epoch (ms). */
+    private parseHtmlDate(title?: string | null): Timestamp {
+        if (title) {
+            const m = title.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})(?:\s*UTC([+-]\d{2}):(\d{2}))?/);
+            if (m) {
+                const [, dd, MM, yyyy, HH, mm, ss, offH, offM] = m;
+                // The shown time is LOCAL; convert to UTC using the explicit offset (UTC = local − offset).
+                let ts = Date.UTC(+yyyy, +MM - 1, +dd, +HH, +mm, +ss);
+                if (offH !== undefined && offM !== undefined) {
+                    const sign = offH.startsWith("-") ? -1 : 1;
+                    ts -= sign * (Math.abs(+offH) * 3600 + +offM * 60) * 1000;
+                }
+                if (!Number.isNaN(ts)) return ts;
+            }
+        }
+        return this.lastEmittedMessageTimestamp ?? this.lastMessageTimestampInFile ?? 0;
+    }
+
+    /** Infers an AttachmentType from the media-wrapper classes of an HTML message element. */
+    private detectHtmlAttachment(el: HTMLElement): AttachmentType | undefined {
+        if (!el.querySelector(".media_wrap")) return undefined;
+        if (el.querySelector(".sticker_wrap")) return AttachmentType.Sticker;
+        if (el.querySelector(".animated_wrap")) return AttachmentType.ImageAnimated;
+        if (el.querySelector(".video_file_wrap")) return AttachmentType.Video;
+        if (el.querySelector(".photo_wrap")) return AttachmentType.Image;
+        if (el.querySelector(".media_voice_message")) return AttachmentType.Audio;
+        if (el.querySelector(".media_poll")) return undefined; // poll, not a file attachment
+        const fileEl = el.querySelector(".media_file");
+        if (fileEl) {
+            const href = fileEl.getAttribute("href") || "";
+            return href ? getAttachmentTypeFromFileName(href) : AttachmentType.Document;
+        }
+        // link previews, calls, contacts, locations → not counted as a file attachment
+        return undefined;
     }
 }

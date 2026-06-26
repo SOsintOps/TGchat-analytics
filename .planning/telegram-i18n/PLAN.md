@@ -159,9 +159,9 @@ storage, bloats file, breaks privacy). Verify Claude model IDs/pricing via the `
 ## 6. SCALETTA — ordered actions & tests (check off = atomic commit)
 
 ### Phase A — Baseline & fixtures
-- [ ] A1. Add Telegram **HTML** test fixtures from `sample/` (small slices) under `tests/samples/telegram/html/` + expected `.ts`.
-- [ ] A2. Add a synthetic **Chinese (T+S)** message fixture for CJK tokenizer tests.
-- [ ] A3. Establish cross-validation harness: parse `sample` JSON vs HTML for the same chat → assert matching message/author counts & date range.
+- [x] A1. HTML covered by a deterministic handcrafted fixture in `tests/parse/TelegramHtmlParser.test.ts` (cleaner than slicing the big `sample/` pages).
+- [ ] A2. Add a synthetic **Chinese (T+S)** message fixture for CJK tokenizer tests. (Phase D)
+- [x] A3. Cross-validation done (script, not committed): parsed `sample` JSON vs HTML for all 3 chats. **Message counts & date ranges match** (cyberdetective 3350=3350; osintops 3600=3600; OSINT форум 31545 vs 31546 = Δ1/31k; date ranges identical). Author counts differ by design (HTML name-based identity — see §2.2): channels over-count (signed/forwarded posts), groups under-count (name collisions).
 
 ### Phase B — JSON hardening (old/new) ✅ DONE (commit)
 - [x] B1. Extended `Telegram.d.ts`: `text_entities?`, open `action`/`type`, `from_id: string|number` (+prefixed-id note), media placeholders (`photo`/`file`), `forwarded_from(_id)`, `reply_to_peer_id`, `saved_from`, richer `TextArray` (plain/custom_emoji/spoiler/href/document_id…). `text` made optional.
@@ -169,11 +169,11 @@ storage, bloats file, breaks privacy). Verify Claude model IDs/pricing via the `
 - [x] B3. `Date.parse` NaN guard (falls back to last-known ts to preserve ordering); `edited` NaN→undefined. (Per-file invalid-JSON try/catch deferred — handled at the generate-orchestration layer; noted.)
 - [x] B4. `tests/parse/TelegramParser.test.ts`: OLD fixture (no `_unixtime`, integer `from_id`, legacy array), NEW fixture (prefixed id, `text_entities`, custom_emoji, **Cyrillic name**), malformed-date resilience. **21/21 pass** (incl. existing sample test).
 
-### Phase C — HTML directory parser (net-new)
-- [ ] C1. Directory-aware input: collect+sort `messages*.html`; expose to parser (browser `webkitdirectory` + Node test path).
-- [ ] C2. `TelegramHtmlParser` via `DOMParser`: `.message` iteration; `joined` author carry-forward; `from_name`; date from `.details[title]` with `UTC±` offset → UTC; reply `#go_to_messageNNN`; media type from wrapper class; service-message skip (map `phone_call` text if feasible). Emits the same `P*` model.
-- [ ] C3. Format detection + `createParser` wiring (HTML dir vs JSON file).
-- [ ] C4. Tests: parse all 3 `sample/` HTML exports; cross-validate vs their `result.json` (Phase A3).
+### Phase C — HTML directory parser (net-new) ✅ DONE (commit)
+- [x] C1. Multi-file handled by the existing `<input multiple>` flow (each `messages*.html` is parsed independently; per-message timestamps make global file ordering unnecessary). Non-message files (css/js/photos) are skipped via head detection. (`webkitdirectory` folder-picker = optional UI nicety, deferred.)
+- [x] C2. `parseHtmlFile` in `TelegramParser` using **worker-safe `node-html-parser`** (NOT DOMParser — pipeline runs in a Web Worker): `.message` iteration; `joined`-class author carry-forward; `.from_name`; date from `.pull_right.date.details[title]` `dd.mm.yyyy HH:MM:SS UTC±HH:MM` → UTC (offset-aware); reply `#go_to_messageNNN`; media type from wrapper class (`photo_wrap`/`sticker_wrap`/`animated_wrap`/`video_file_wrap`/poll); `service` skip. Emits the same `P*` model. Channel/author keyed by display name (HTML has no numeric id / from_id).
+- [x] C3. Format auto-detection inside `parse()` (HTML vs JSON vs skip). No `createParser` change needed — `createParser("telegram")` handles both formats transparently. Added `transformIgnorePatterns` so jest transforms node-html-parser's ESM `entities` dep.
+- [x] C4. `tests/parse/TelegramHtmlParser.test.ts` (2/2 pass) + real-sample cross-validation (A3).
 
 ### Phase D — Non-Western tokenization
 - [ ] D1. Verify Russian: tokenization + `ru` stopwords on the `OSINT форум расследований` sample; add a Russian assertion test.
