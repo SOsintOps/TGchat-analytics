@@ -1,4 +1,9 @@
 <!--suppress HtmlDeprecatedAttribute -->
+
+> **About this fork.** TGchat-analytics is the [SOsintOps](https://github.com/SOsintOps) fork of [chat-analytics](https://github.com/mlomb/chat-analytics) (this branch tracks [mlshdev/chat-analytics](https://github.com/mlshdev/chat-analytics)). It adds parsing of Telegram Desktop HTML-export folders, a JSON parser hardened for old and new Telegram export formats, and word segmentation for Chinese, Japanese and Korean text, with Russian tokenisation verified by tests; the rest of this README is the upstream text.
+>
+> Related SOsintOps projects: [TelEgrapherX](https://github.com/SOsintOps/TelEgrapherX) (Telegram group and channel collection), [Argos](https://github.com/SOsintOps/Argos) and [Speculator](https://github.com/SOsintOps/Speculator-Project) (OSINT workstations), [Intelligence Field Notes](https://github.com/SOsintOps/intelligence-field-notes) (the method for evaluating and reporting what the chats show).
+
 <div align="center">
 
 ![Logo-Dark](assets/images/logos/app_dark.svg#gh-dark-mode-only)
